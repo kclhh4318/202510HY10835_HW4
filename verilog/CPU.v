@@ -17,6 +17,7 @@ module CPU(
 	reg [31:0] A;
 	reg [31:0] B;
 	reg [31:0] ALUOut;
+	reg [31:0] BranchTarget;
 
 	// Split the instructions
 	wire [5:0]		opcode;
@@ -27,6 +28,7 @@ module CPU(
 	wire [5:0]		funct;
 	wire [15:0]		imm;
 	wire [25:0]		target;
+	
 
 	assign opcode = IR[31:26];
 	assign rs = IR[25:21];
@@ -58,14 +60,16 @@ module CPU(
 	wire alu_zero;
 	wire PC_en;
 
+	assign alu_zero = alu_result;
+
 	// SignExtend Immediate
-	assign ext_imm = SignExtend ? {{15{imm[15]}}, imm} : {16'b0, imm};
+	assign ext_imm = SignExtend ? ((imm[15]) ? {16'hFFFF, imm} : {16'h0000, imm}) : {16'h0000, imm};
 
 	assign mem_addr = IorD ? ALUOut : PC;
 	assign mem_write_data = B;
 
 	assign reg_write_addr = SavePC ? 5'd31 : (RegDst ? rd : rt);
-	assign reg_write_data = SavePC ? (PC + 4) : (MemtoReg ? MDR : ALUOut);
+	assign reg_write_data = SavePC ? PC : (MemtoReg ? MDR : ALUOut);
 
 	// ALU input MUX
 	assign alu_in1 = (ALUSrcA == 2'b00) ? PC :
@@ -87,10 +91,20 @@ module CPU(
 			B <= 32'b0;
 			ALUOut <= 32'b0;
 		end else begin
+
+			if (state == `STATE_ID) begin
+				A <= reg_read_data1;
+				B <= reg_read_data2;
+
+				if (opcode == `OP_BEQ || opcode == `OP_BNE) begin
+					BranchTarget <= PC + (ext_imm << 2);
+				end
+			end
+
 			if (PC_en) begin
 				case (PCSource)
 					2'b00: PC <= alu_result; // PC + 4
-					2'b01: PC <= ALUOut; // Branch Target Address
+					2'b01: PC <= BranchTarget; // Branch Target Address
 					2'b10: PC <= {PC[31:28], target, 2'b00}; // Jump address
 					2'b11: PC <= A; // jr address
 				endcase
