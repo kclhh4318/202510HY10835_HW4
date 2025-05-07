@@ -20,7 +20,13 @@ public:
 
 	// Act like a storage element
 	uint32_t PC;
+    uint32_t IR;
+    uint32_t MDR;
+    uint32_t A;
+    uint32_t B;
+    uint32_t ALUOut;
+
+    uint32_t state;
 };
 
 #endif // CPU_H
-

@@ -58,4 +58,12 @@ enum Opcode {
 	OP_SW = 43
 };
 
+enum State {
+	STATE_IF = 0,
+	STATE_ID = 1,
+	STATE_EX = 2,
+	STATE_MEM = 3,
+	STATE_WB = 4
+};
+
 extern Status status;

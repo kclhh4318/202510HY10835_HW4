@@ -40,3 +40,9 @@
 `define		OP_LUI				6'd15
 `define		OP_LW				6'd35
 `define		OP_SW				6'd43
+
+`define     STATE_IF            3'b000
+`define     STATE_ID            3'b001
+`define     STATE_EX            3'b010
+`define     STATE_MEM           3'b011
+`define     STATE_WB            3'b100

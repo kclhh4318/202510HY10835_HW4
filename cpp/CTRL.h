@@ -20,6 +20,14 @@ public:
 		uint32_t RegWrite;
 		uint32_t ALUOp;
 		uint32_t SavePC; //jal inst 때문에 필요. -> jal; jump를 하면서 pc+4 값을 31번 ra register에 나타내기 위해 새로운 ctrlsignal 생성
+
+		uint32_t IorD;
+		uint32_t PCWrite;
+		uint32_t PCWriteCond;
+		uint32_t IRWrite;
+		uint32_t ALUSrcA;
+		uint32_t ALUSrcB;
+		uint32_t PCSource;
 	}; // 필요한 control signals
 	struct ParsedInst {
 		uint32_t opcode;
@@ -31,7 +39,7 @@ public:
 		uint32_t immi; //16bits
 		uint32_t immj; //26bits
 	}; 
-	void controlSignal(uint32_t opcode, uint32_t funct, Controls *controls);
+	void controlSignal(uint32_t opcode, uint32_t funct, uint32_t state, Controls *controls);
 	void splitInst(uint32_t inst, ParsedInst *parsed_inst);
 	void signExtend(uint32_t immi, uint32_t SignExtend, uint32_t *ext_imm);
 };

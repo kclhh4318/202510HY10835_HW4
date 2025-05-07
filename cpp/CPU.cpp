@@ -7,7 +7,9 @@
 
 using namespace std;
 
-CPU::CPU() {}
+CPU::CPU() {
+	state = STATE_IF;
+}
 
 // Reset stateful modules
 void CPU::init(string inst_file) {
@@ -16,9 +18,15 @@ void CPU::init(string inst_file) {
 	// Load the instructions from the memory
 	mem.load(inst_file);
 	// Reset the program counter
-	// 저장이 되어야 하는 storage element인 pc는 header file에 class variable로 생성
-	// tick이 끝나도 값이 계속 저장될 수 있음(RF와 동일)
 	PC = 0;
+
+	IR = 0;
+	MDR = 0;
+	A = 0;
+	B = 0;
+	ALUOut = 0;
+
+	state = STATE_IF;
 
 	// Set the debugging status
 	status = CONTINUE;
@@ -26,89 +34,128 @@ void CPU::init(string inst_file) {
 
 // This is a cycle-accurate simulation
 uint32_t CPU::tick() {
-	// wire는 function 안에 variable 형태로 declare된 형태
-
-	// These are just one of the implementations ...
-	
-	// wire for instruction
-	uint32_t inst;
-
-	// parsed & control signals (wire)
 	CTRL::ParsedInst parsed_inst;
 	CTRL::Controls controls;
+
+	if (state == STATE_IF) {
+		ctrl.splitInst(0, &parsed_inst);
+	} else {
+		ctrl.splitInst(IR, &parsed_inst);
+	}
+
+	ctrl.controlSignal(parsed_inst.opcode, parsed_inst.funct, state, &controls);
+
 	uint32_t ext_imm;
-
-	// Default wires and control signals
-	uint32_t rs_data, rt_data;
-	uint32_t wr_addr;
-	uint32_t wr_data;
-	uint32_t operand1;
-	uint32_t operand2;
-	uint32_t alu_result;
-
-	// PC_next
-	uint32_t PC_next;
-
-	// You can declare your own wires (if you want ...)
-	uint32_t mem_data;
-
-	// Access the instruction memory
-	mem.imemAccess(PC, &inst);
-	// 원치 않는 OF 값으로 접근했을 시 incorrect status 배출됨
-	// last instruction 실행 시에도 0을 return 하도록 함
-	if (status != CONTINUE) return 0;
-	
-	// Split the instruction & set the control signals
-	ctrl.splitInst(inst, &parsed_inst);
-	ctrl.controlSignal(parsed_inst.opcode, parsed_inst.funct, &controls);
 	ctrl.signExtend(parsed_inst.immi, controls.SignExtend, &ext_imm);
-	if (status != CONTINUE) return 0;
 
-	rf.read(parsed_inst.rs, parsed_inst.rt, &rs_data, &rt_data);
+	uint32_t alu_in1 = 0;
+	uint32_t alu_in2 = 0;
 
-	//R-type, I-type 별 operand 불러오는 방법 다르니 setting
-	operand1 = rs_data;
-	operand2 = (controls.ALUSrc) ? ext_imm : rt_data;
+	if (controls.ALUSrcA == 0) {
+	alu_in1 = PC;
+	} else {
+	alu_in1 = A;
+	}
 
-	alu.compute(operand1, operand2, parsed_inst.shamt, controls.ALUOp, &alu_result);
-	if (status != CONTINUE) return 0;
+	switch (controls.ALUSrcB) {
+		case 0: alu_in2 = B; break;
+		case 1: alu_in2 = 4; break;
+		case 2: alu_in2 = ext_imm; break;
+		case 3: alu_in2 = (ext_imm << 2) & 0xFFFFFFFC; break;
+	}
 
-	// MEM (+PC Update)
-	mem.dmemAccess(alu_result, &mem_data, rt_data, controls.MemRead, controls.MemWrite);
-	if (status != CONTINUE) return 0;
-	
-    if(controls.SavePC){
-        wr_addr = 31;
-        wr_data = PC + 4;
-    } else{
-        wr_addr = controls.RegDst ? parsed_inst.rd : parsed_inst.rt;
-        wr_data = controls.MemtoReg ? mem_data : alu_result;
-    }
+	uint32_t alu_result;
+	alu.compute(alu_in1, alu_in2, parsed_inst.shamt, controls.ALUOp, &alu_result);
 
-    rf.write(wr_addr, wr_data, controls.RegWrite);
+	uint32_t mem_addr = controls.IorD ? ALUOut : PC;
 
-    if(controls.Jump){
-        if(controls.JR){
-            PC_next = rs_data;
-        } else{
-            PC_next = ((PC + 4) & 0xF0000000) | (parsed_inst.immj << 2);
-        }
-    }
-	else if(controls.Branch){
-        if(alu_result){
-            PC_next = PC + 4 + (ext_imm << 2);
-        } else{
-            PC_next = PC + 4;
-        }
-    } else{
-        PC_next = PC + 4;
-    }
+	uint32_t mem_data;
+	mem.memAccess(mem_addr, &mem_data, B, controls.MemRead, controls.MemWrite);
 
-    PC = PC_next;
+	switch (state) {
+		case STATE_IF:
+			if (controls.IRWrite) {
+				IR = mem_data;
+			}
 
-	// 추가로 중간중간 빠져있는 reg_read, reg_write 처리
-	
+			if (controls.PCWrite) {
+				PC = alu_result;
+			}
+
+			state = STATE_ID;
+			break;
+
+		case STATE_ID:
+			rf.read(parsed_inst.rs, parsed_inst.rt, &A, &B);
+
+			if ((parsed_inst.opcode == OP_J) || (parsed_inst.opcode == OP_JAL) || (parsed_inst.opcode == OP_RTYPE && parsed_inst.funct == FUNCT_JR)) {
+				if (parsed_inst.opcode == OP_JAL) {
+					rf.write(31, PC, 1);
+				}
+
+				if (parsed_inst.opcode == OP_J || parsed_inst.opcode == OP_JAL) {
+					PC = ((PC & 0xF0000000) | (parsed_inst.immj << 2));
+				} else {
+					PC = A;
+				}
+
+				state = STATE_IF;
+			} else {
+				state = STATE_EX;
+			}
+			break;
+
+		case STATE_EX:
+			if (parsed_inst.opcode == OP_BEQ || parsed_inst.opcode == OP_BNE) {
+				uint32_t cmp_result;
+				if (parsed_inst.opcode == OP_BEQ) {
+					alu.compute(A, B, 0, ALU_EQ, &cmp_result);
+				} else {
+					alu.compute(A, B, 0, ALU_NEQ, &cmp_result);
+				}
+
+				uint32_t branch_target = PC + ((ext_imm << 2) & 0xFFFFFFFC);
+
+				if (cmp_result) {
+					PC = branch_target;
+				}
+
+				state = STATE_IF;
+			} else {
+				ALUOut = alu_result;
+					
+				if (parsed_inst.opcode == OP_LW || parsed_inst.opcode == OP_SW) {
+					state = STATE_MEM;
+				} else {
+					state = STATE_WB;
+				}
+			}
+			break;
+
+		case STATE_MEM:
+			MDR = mem_data;
+				
+			if (parsed_inst.opcode == OP_LW) {
+				state = STATE_WB;
+			} else {
+				state = STATE_IF;
+			}
+			break;
+
+		case STATE_WB:
+			if (controls.RegWrite) {
+				uint32_t write_reg = controls.RegDst ? parsed_inst.rd : parsed_inst.rt;
+				uint32_t write_data = controls.MemtoReg ? MDR : ALUOut;
+				rf.write(write_reg, write_data, 1);
+			}
+			
+			state = STATE_IF;
+			break;
+	}
+
+	if (IR == 0 && state == STATE_ID) {
+		status = TERMINATE;
+	}
+		
 	return 1;
-	
 }
-

@@ -27,7 +27,7 @@ module RF (
 		if (rst) begin
         	$readmemh("initial_reg.mem", register_file);
 		end
-		else if (RegWrite) begin
+		else if (RegWrite && wr_addr != 0) begin
 				register_file[wr_addr] <= wr_data;
 		end
 	end

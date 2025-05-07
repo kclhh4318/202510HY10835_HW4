@@ -5,124 +5,120 @@ module CPU(
 	input		clk,
 	input		rst,
 	output 		halt
-	);
-	
+);
+	// state-related sig
+	wire [2:0] state;
+	wire [2:0] next_state;
+
+	// register sig
+	reg [31:0]	PC;
+	reg [31:0] IR;
+	reg [31:0] MDR;
+	reg [31:0] A;
+	reg [31:0] B;
+	reg [31:0] ALUOut;
+
 	// Split the instructions
-	// Instruction-related wires
-	wire [31:0]		inst;
 	wire [5:0]		opcode;
 	wire [4:0]		rs;
 	wire [4:0]		rt;
 	wire [4:0]		rd;
 	wire [4:0]		shamt;
 	wire [5:0]		funct;
-	wire [15:0]		immi;
-	wire [25:0]		immj;
+	wire [15:0]		imm;
+	wire [25:0]		target;
 
-	// Control-related wires
-	wire			RegDst;
-	wire			Jump;
-	wire 			Branch;
-	wire 			JR;
-	wire			MemRead;
-	wire			MemtoReg;
-	wire 			MemWrite;
-	wire			ALUSrc;
-	wire			SignExtend;
-	wire			RegWrite;
-	wire [3:0]		ALUOp;
-	wire			SavePC;
+	assign opcode = IR[31:26];
+	assign rs = IR[25:21];
+	assign rt = IR[20:16];
+	assign rd = IR[15:11];
+	assign shamt = IR[10:6];
+	assign funct = IR[5:0];
+	assign imm = IR[15:0];
+	assign target = IR[25:0];
 
-	// Sign extend the immediate
-	wire [31:0]		ext_imm;
+	// control sig
+	wire RegDst, Jump, Branch, JR, MemRead, MemtoReg, MemWrite, ALUSrc, SignExtend, RegWrite, SavePC;
+	wire IorD, PCWrite, PCWriteCond, IRWrite;
+	wire [1:0] ALUSrcA, ALUSrcB, PCSource;
+	wire [3:0] ALUOp;
 
-	// RF-related wires
-	wire [4:0]		rd_addr1;
-	wire [4:0]		rd_addr2;
-	wire [31:0]		rd_data1;
-	wire [31:0]		rd_data2;
-	reg [4:0]		wr_addr;
-	reg [31:0]		wr_data;
+	// data sig
+	wire [31:0] ext_imm;
+	wire [31:0] mem_addr;
+	wire [31:0] mem_read_data;
+	wire [31:0] mem_write_data;
+	wire [31:0] reg_read_data1;
+	wire [31:0] reg_read_data2;
+	wire [4:0] reg_write_addr;
+	wire [31:0] reg_write_data;
+	wire [31:0] alu_in1;
+	wire [31:0] alu_in2;
+	wire [31:0] alu_result;
+	wire alu_zero;
+	wire PC_en;
 
-	// MEM-related wires
-	wire [31:0]		mem_addr;
-	wire [31:0]		mem_write_data;
-	wire [31:0]		mem_read_data;
+	// SignExtend Immediate
+	assign ext_imm = SignExtend ? {{15{imm[15]}}, imm} : {16'b0, imm};
 
-	// ALU-related wires
-	wire [31:0]		operand1;
-	wire [31:0]		operand2;
-	wire [31:0]		alu_result;
+	assign mem_addr = IorD ? ALUOut : PC;
+	assign mem_write_data = B;
 
-	// Define PC
-	reg [31:0]	PC;
-	reg [31:0]	PC_next;
+	assign reg_write_addr = SavePC ? 5'd31 : (RegDst ? rd : rt);
+	assign reg_write_data = SavePC ? (PC + 4) : (MemtoReg ? MDR : ALUOut);
 
-	// Define the wires
+	// ALU input MUX
+	assign alu_in1 = (ALUSrcA == 2'b00) ? PC :
+					 (ALUSrcA == 2'b01) ? A : 32'b0;
 
-	assign halt				= (inst == 32'b0);
-	assign opcode = inst[31:26];
-	assign rs = inst[25:21];
-	assign rt = inst[20:16];
-	assign rd = inst[15:11];
-	assign shamt = inst[10:6];
-	assign funct = inst[5:0];
-	assign immi = inst[15:0];
-	assign immj = inst[25:0];
+	assign alu_in2 = (ALUSrcB == 2'b00) ? B :
+					 (ALUSrcB == 2'b01) ? 32'd4 :
+					 (ALUSrcB == 2'b10) ? ext_imm :
+					 (ALUSrcB == 2'b11) ? (ext_imm << 2) : 32'b0;
 
-	assign rd_addr1 = rs;
-	assign rd_addr2 = rt;
+	assign PC_en = PCWrite | (PCWriteCond & alu_zero);
 
-	assign operand1 = rd_data1;
-	assign operand2 = ALUSrc ? ext_imm : rd_data2;
-
-	assign mem_addr = alu_result;
-	assign mem_write_data = rd_data2;
-
-	assign ext_imm = SignExtend ? ((immi[15]) ? {16'hFFFF, immi} : {16'h0000, immi}) : {16'h0000, immi};
-
-	always @(*) begin
-		// PC_next logic
-		// JAL, JR process
-		if(SavePC) 
-			wr_addr = 5'd31;
-		else
-			wr_addr = RegDst ? rd : rt;
-
-		if(SavePC)
-			wr_data = PC + 4;
-		else
-			wr_data = MemtoReg ? mem_read_data : alu_result;
-
-		if(Jump) begin
-			if(JR) begin
-				PC_next = rd_data1;
-			end else begin
-				PC_next = {PC[31:28], immj, 2'b00};
-			end
-		end
-		else if(Branch) begin
-			if(alu_result)
-				PC_next = PC + 4 + (ext_imm << 2);
-			else
-				PC_next = PC + 4;
+	always @(posedge clk or posedge rst) begin
+		if (rst) begin
+			PC <= 32'b0;
+			IR <= 32'b0;
+			MDR <= 32'b0;
+			A <= 32'b0;
+			B <= 32'b0;
+			ALUOut <= 32'b0;
 		end else begin
-			PC_next = PC + 4;
+			if (PC_en) begin
+				case (PCSource)
+					2'b00: PC <= alu_result; // PC + 4
+					2'b01: PC <= ALUOut; // Branch Target Address
+					2'b10: PC <= {PC[31:28], target, 2'b00}; // Jump address
+					2'b11: PC <= A; // jr address
+				endcase
+			end
+
+			if (IRWrite)
+				IR <= mem_read_data;
+
+			MDR <= mem_read_data;
+
+			if (state == `STATE_ID) begin
+				A <= reg_read_data1;
+				B <= reg_read_data2;
+			end
+
+			ALUOut <= alu_result;
 		end
 	end
 
+	assign halt = (IR == 32'b0) && (state == `STATE_ID);
 
-	// Update the Clock
-	always @(posedge clk) begin
-		if (rst)	PC <= 0;
-		else begin
-			PC <= PC_next;
-		end
-	end
-	
 	CTRL ctrl (
+		.clk(clk),
+		.rst(rst),
 		.opcode(opcode),
 		.funct(funct),
+		.state(state),
+		.next_state(next_state),
 		.RegDst(RegDst),
 		.Jump(Jump),
 		.Branch(Branch),
@@ -134,38 +130,43 @@ module CPU(
 		.SignExtend(SignExtend),
 		.RegWrite(RegWrite),
 		.ALUOp(ALUOp),
-		.SavePC(SavePC)
+		.SavePC(SavePC),
+		.IorD(IorD),
+		.PCWrite(PCWrite),
+		.PCWriteCond(PCWriteCond),
+		.IRWrite(IRWrite),
+		.ALUSrcA(ALUSrcA),
+		.ALUSrcB(ALUSrcB),
+		.PCSource(PCSource)
 	);
 
 	RF rf (
 		.clk(clk),
 		.rst(rst),
-		.rd_addr1(rd_addr1),
-		.rd_addr2(rd_addr2),
-		.rd_data1(rd_data1),
-		.rd_data2(rd_data2),
+		.rd_addr1(rs),
+		.rd_addr2(rt),
+		.rd_data1(reg_read_data1),
+		.rd_data2(reg_read_data2),
 		.RegWrite(RegWrite),
-		.wr_addr(wr_addr),
-		.wr_data(wr_data)
+		.wr_addr(reg_write_addr),
+		.wr_data(reg_write_data)
 	);
 
 	MEM mem (
 		.clk(clk),
 		.rst(rst),
-		.inst_addr(PC),
-		.inst(inst),
 		.mem_addr(mem_addr),
 		.MemWrite(MemWrite),
 		.mem_write_data(mem_write_data),
 		.mem_read_data(mem_read_data)
 	);
-	
+
 	ALU alu (
-		.operand1(operand1),
-		.operand2(operand2),
+		.operand1(alu_in1),
+		.operand2(alu_in2),
 		.shamt(shamt),
 		.funct(ALUOp),
 		.alu_result(alu_result)
 	);
-	
+
 endmodule

@@ -39,7 +39,7 @@ void RF::read(uint32_t rd_addr1, uint32_t rd_addr2, uint32_t *rd_data1, uint32_t
 
 void RF::write(uint32_t wr_addr, uint32_t wr_data, uint32_t RegWrite) {
 	// FILLME
-	if(RegWrite) register_files[wr_addr] = wr_data;
+	if (RegWrite && wr_addr != 0) register_files[wr_addr] = wr_data; 
 }
 
 void RF::dump() {
