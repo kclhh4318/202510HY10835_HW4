@@ -25,6 +25,7 @@ public:
     uint32_t A;
     uint32_t B;
     uint32_t ALUOut;
+    uint32_t temp;
 
     uint32_t state;
 };

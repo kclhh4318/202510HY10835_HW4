@@ -19,7 +19,6 @@ void CTRL::controlSignal(uint32_t opcode, uint32_t funct, uint32_t state, Contro
 	controls -> MemRead = 0;
 	controls -> MemtoReg = 0;
 	controls -> MemWrite = 0;
-	controls -> ALUSrc = 0;
 	controls -> SignExtend = 1;
 	controls -> RegWrite = 0;
 	controls -> SavePC = 0;
@@ -31,10 +30,11 @@ void CTRL::controlSignal(uint32_t opcode, uint32_t funct, uint32_t state, Contro
 	controls -> IRWrite = 0;
 	controls -> ALUSrcA = 0;
 	controls -> ALUSrcB = 0;
-	controls -> PCSource = 0;
+	controls -> PCSource = 0; //0이면 그냥 pc+4 1이면 branch 2면 jump
 
 	switch (state) {
 		case STATE_IF:
+			controls -> IorD = 0;
 			controls -> MemRead = 1;
 			controls -> IRWrite = 1;
 			controls -> ALUSrcA = 0;
@@ -64,6 +64,14 @@ void CTRL::controlSignal(uint32_t opcode, uint32_t funct, uint32_t state, Contro
 				controls -> PCSource = 3;
 				controls -> JR = 1;
 				controls -> Jump = 1;
+			} else if (opcode == OP_BEQ || opcode == OP_BNE) {
+				controls -> ALUSrcA = 0;
+				controls -> ALUSrcB = 3;
+				controls -> ALUOp = ALU_ADDU;
+				controls -> Branch = 1;
+				controls -> PCWriteCond = 1;
+				controls -> PCSource = 1;
+				controls -> RegWrite = 0;
 			}
 			break;
 			
@@ -87,9 +95,8 @@ void CTRL::controlSignal(uint32_t opcode, uint32_t funct, uint32_t state, Contro
 					case FUNCT_NOR: controls -> ALUOp = ALU_NOR; break;
 				}
 			} else if (opcode == OP_BEQ || opcode == OP_BNE) {
-				controls -> ALUSrcA = 0;
-				controls -> ALUSrcB = 3;
-				controls -> ALUOp = ALU_ADDU;
+				controls -> ALUSrcA = 1;
+				controls -> ALUSrcB = 0;
 				controls -> Branch = 1;
 				controls -> PCWriteCond = 1;
 				controls -> PCSource = 1;
@@ -112,9 +119,14 @@ void CTRL::controlSignal(uint32_t opcode, uint32_t funct, uint32_t state, Contro
 					case OP_XORI: controls -> ALUOp = ALU_XOR; controls -> SignExtend = 0; break;
 					case OP_LUI: controls -> ALUOp = ALU_LUI; controls -> SignExtend = 0; break;
 					case OP_LW:
+						controls -> ALUOp = ALU_ADDU;
+						controls -> SignExtend = 1;
+						controls -> MemRead = 1;
+						break;
 					case OP_SW:
 						controls -> ALUOp = ALU_ADDU;
 						controls -> SignExtend = 1;
+						controls -> MemWrite = 1;
 						break;
 				}
 			}
@@ -142,6 +154,13 @@ void CTRL::controlSignal(uint32_t opcode, uint32_t funct, uint32_t state, Contro
 			} else {
 				controls -> RegDst = 0;
 				controls -> MemtoReg = 0;
+			}
+
+			if (opcode == OP_JAL){
+				controls -> SavePC = 1;
+				controls -> RegDst = 2;
+				controls -> MemtoReg = 2;
+
 			}
 			break;
 	}

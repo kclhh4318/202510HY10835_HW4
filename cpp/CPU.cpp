@@ -40,7 +40,7 @@ uint32_t CPU::tick() {
 	if (state == STATE_IF) {
 		ctrl.splitInst(0, &parsed_inst);
 	} else {
-		ctrl.splitInst(IR, &parsed_inst);
+		ctrl.splitInst(IR, &parsed_inst); 
 	}
 
 	ctrl.controlSignal(parsed_inst.opcode, parsed_inst.funct, state, &controls);
@@ -51,35 +51,42 @@ uint32_t CPU::tick() {
 	uint32_t alu_in1 = 0;
 	uint32_t alu_in2 = 0;
 
-	if (controls.ALUSrcA == 0) {
-	alu_in1 = PC;
-	} else {
-	alu_in1 = A;
-	}
-
-	switch (controls.ALUSrcB) {
-		case 0: alu_in2 = B; break;
-		case 1: alu_in2 = 4; break;
-		case 2: alu_in2 = ext_imm; break;
-		case 3: alu_in2 = (ext_imm << 2) & 0xFFFFFFFC; break;
-	}
-
 	uint32_t alu_result;
-	alu.compute(alu_in1, alu_in2, parsed_inst.shamt, controls.ALUOp, &alu_result);
-
-	uint32_t mem_addr = controls.IorD ? ALUOut : PC;
+	
+	uint32_t mem_addr;
 
 	uint32_t mem_data;
-	mem.memAccess(mem_addr, &mem_data, B, controls.MemRead, controls.MemWrite);
 
 	switch (state) {
 		case STATE_IF:
+			mem_addr = controls.IorD ? ALUOut : PC;
+			mem.memAccess(mem_addr, &mem_data, B, controls.MemRead, controls.MemWrite);
+
+			if (controls.ALUSrcA == 0) {
+				alu_in1 = PC;
+				} else {
+				alu_in1 = A;
+				}
+		
+			switch (controls.ALUSrcB) {
+				case 0: alu_in2 = B; break;
+				case 1: alu_in2 = 4; break;
+				case 2: alu_in2 = ext_imm; break;
+				case 3: alu_in2 = (ext_imm << 2) & 0xFFFFFFFC; break;
+			}
+			alu.compute(alu_in1, alu_in2, parsed_inst.shamt, controls.ALUOp, &alu_result);
+
 			if (controls.IRWrite) {
 				IR = mem_data;
 			}
 
 			if (controls.PCWrite) {
-				PC = alu_result;
+				switch(controls.PCSource){
+					case 0: PC = alu_result; break;
+					case 1: PC = ALUOut; break;
+					case 2: PC = ((PC & 0xF0000000) | (parsed_inst.immj << 2)); break;
+					case 3: PC = A; break;
+				}
 			}
 
 			state = STATE_ID;
@@ -88,43 +95,87 @@ uint32_t CPU::tick() {
 		case STATE_ID:
 			rf.read(parsed_inst.rs, parsed_inst.rt, &A, &B);
 
-			if ((parsed_inst.opcode == OP_J) || (parsed_inst.opcode == OP_JAL) || (parsed_inst.opcode == OP_RTYPE && parsed_inst.funct == FUNCT_JR)) {
-				if (parsed_inst.opcode == OP_JAL) {
-					rf.write(31, PC, 1);
+			if(controls.Branch) {
+				if (controls.ALUSrcA == 0) {
+					alu_in1 = PC;
+					} else {
+					alu_in1 = A;
+					}
+			
+				switch (controls.ALUSrcB) {
+					case 0: alu_in2 = B; break;
+					case 1: alu_in2 = 4; break;
+					case 2: alu_in2 = ext_imm; break;
+					case 3: alu_in2 = (ext_imm << 2) & 0xFFFFFFFC; break;
 				}
+				alu.compute(alu_in1, alu_in2, parsed_inst.shamt, controls.ALUOp, &alu_result);
+				ALUOut = alu_result;
+			}
 
-				if (parsed_inst.opcode == OP_J || parsed_inst.opcode == OP_JAL) {
-					PC = ((PC & 0xF0000000) | (parsed_inst.immj << 2));
-				} else {
-					PC = A;
+			if (controls.Jump) {
+				if (controls.SavePC) {
+					temp = PC;
+				} 
+				switch(controls.PCSource){
+					case 0: PC = alu_result; break;
+					case 1: PC = ALUOut; break;
+					case 2: PC = ((PC & 0xF0000000) | (parsed_inst.immj << 2)); break;
+					case 3: PC = A; break;
 				}
 
 				state = STATE_IF;
+				if (controls.SavePC){
+					state = STATE_WB;
+				}
 			} else {
 				state = STATE_EX;
 			}
 			break;
 
 		case STATE_EX:
-			if (parsed_inst.opcode == OP_BEQ || parsed_inst.opcode == OP_BNE) {
+			if (controls.Branch) {
 				uint32_t cmp_result;
-				if (parsed_inst.opcode == OP_BEQ) {
-					alu.compute(A, B, 0, ALU_EQ, &cmp_result);
-				} else {
-					alu.compute(A, B, 0, ALU_NEQ, &cmp_result);
+				if (controls.ALUSrcA == 0) {
+					alu_in1 = PC;
+					} else {
+					alu_in1 = A;
+					}
+			
+				switch (controls.ALUSrcB) {
+					case 0: alu_in2 = B; break;
+					case 1: alu_in2 = 4; break;
+					case 2: alu_in2 = ext_imm; break;
+					case 3: alu_in2 = (ext_imm << 2) & 0xFFFFFFFC; break;
 				}
+				alu.compute(alu_in1, alu_in2, 0, controls.ALUOp, &cmp_result); 
 
-				uint32_t branch_target = PC + ((ext_imm << 2) & 0xFFFFFFFC);
-
-				if (cmp_result) {
-					PC = branch_target;
+				if (cmp_result && controls.PCWriteCond) {
+					switch(controls.PCSource){
+						case 0: PC = alu_result; break;
+						case 1: PC = ALUOut; break;
+						case 2: PC = ((PC & 0xF0000000) | (parsed_inst.immj << 2)); break;
+						case 3: PC = A; break;
+					}
 				}
 
 				state = STATE_IF;
 			} else {
+				if (controls.ALUSrcA == 0) {
+					alu_in1 = PC;
+					} else {
+					alu_in1 = A;
+					}
+			
+				switch (controls.ALUSrcB) {
+					case 0: alu_in2 = B; break;
+					case 1: alu_in2 = 4; break;
+					case 2: alu_in2 = ext_imm; break;
+					case 3: alu_in2 = (ext_imm << 2) & 0xFFFFFFFC; break;
+				}
+				alu.compute(alu_in1, alu_in2, parsed_inst.shamt, controls.ALUOp, &alu_result);
 				ALUOut = alu_result;
-					
-				if (parsed_inst.opcode == OP_LW || parsed_inst.opcode == OP_SW) {
+	
+				if (controls.MemRead || controls.MemWrite) {
 					state = STATE_MEM;
 				} else {
 					state = STATE_WB;
@@ -133,9 +184,11 @@ uint32_t CPU::tick() {
 			break;
 
 		case STATE_MEM:
+			mem_addr = controls.IorD ? ALUOut : PC;
+			mem.memAccess(mem_addr, &mem_data, B, controls.MemRead, controls.MemWrite); 
 			MDR = mem_data;
 				
-			if (parsed_inst.opcode == OP_LW) {
+			if (controls.IorD && controls.MemRead) {
 				state = STATE_WB;
 			} else {
 				state = STATE_IF;
@@ -144,9 +197,20 @@ uint32_t CPU::tick() {
 
 		case STATE_WB:
 			if (controls.RegWrite) {
-				uint32_t write_reg = controls.RegDst ? parsed_inst.rd : parsed_inst.rt;
-				uint32_t write_data = controls.MemtoReg ? MDR : ALUOut;
-				rf.write(write_reg, write_data, 1);
+				uint32_t write_reg;
+				uint32_t write_data;
+				switch(controls.RegDst){
+					case 0: write_reg = parsed_inst.rt; break;
+					case 1: write_reg = parsed_inst.rd; break;
+					case 2: write_reg = 31; break;
+				}
+				switch(controls.MemtoReg){
+					case 0: write_data = ALUOut; break;
+					case 1: write_data = MDR; break;
+					case 2: write_data = temp; break;
+				}
+				
+				rf.write(write_reg, write_data, controls.RegWrite);
 			}
 			
 			state = STATE_IF;
