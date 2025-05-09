@@ -50,9 +50,9 @@ module CTRL(
                 if (opcode == `OP_J)
                     next_state = `STATE_IF;
                 else if (opcode == `OP_JAL)
-                    next_state = `STATE_IF; // JAL은 바로 IF로 가되, PC 값을 $ra에 저장
+                    next_state = `STATE_IF;
                 else if (opcode == `OP_RTYPE && funct == `FUNCT_JR)
-                    next_state = `STATE_IF; // JR도 ID에서 바로 처리
+                    next_state = `STATE_IF;
                 else
                     next_state = `STATE_EX;
             end
@@ -129,8 +129,8 @@ module CTRL(
                     PCSource = 2'b10; // Jump address
                     SavePC = 1'b1;
                     RegWrite = 1'b1;
-                    RegDst = 1'b0;    // 원래 로직에서의 설정 유지
-                    MemtoReg = 1'b0;  // 원래 로직에서의 설정 유지
+                    RegDst = 1'b0;
+                    MemtoReg = 1'b0;
                 end else if (opcode == `OP_RTYPE && funct == `FUNCT_JR) begin
                     // Jump Register - ID 단계에서 처리
                     Jump = 1'b1;
