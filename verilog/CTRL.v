@@ -47,14 +47,17 @@ module CTRL(
         case (state)
             `STATE_IF: next_state = `STATE_ID;
             `STATE_ID: begin
-                if ((opcode == `OP_J) || (opcode == `OP_JAL))
+                if (opcode == `OP_J)
                     next_state = `STATE_IF;
+                else if (opcode == `OP_JAL)
+                    next_state = `STATE_IF; // JAL은 바로 IF로 가되, PC 값을 $ra에 저장
+                else if (opcode == `OP_RTYPE && funct == `FUNCT_JR)
+                    next_state = `STATE_IF; // JR도 ID에서 바로 처리
                 else
                     next_state = `STATE_EX;
             end
             `STATE_EX: begin
-                if (opcode == `OP_BEQ || opcode == `OP_BNE || 
-                    (opcode == `OP_RTYPE && funct == `FUNCT_JR))
+                if (opcode == `OP_BEQ || opcode == `OP_BNE)
                     next_state = `STATE_IF;
                 else if (opcode == `OP_LW || opcode == `OP_SW)
                     next_state = `STATE_MEM;
@@ -126,37 +129,37 @@ module CTRL(
                     PCSource = 2'b10; // Jump address
                     SavePC = 1'b1;
                     RegWrite = 1'b1;
+                    RegDst = 1'b0;    // 원래 로직에서의 설정 유지
+                    MemtoReg = 1'b0;  // 원래 로직에서의 설정 유지
+                end else if (opcode == `OP_RTYPE && funct == `FUNCT_JR) begin
+                    // Jump Register - ID 단계에서 처리
+                    Jump = 1'b1;
+                    JR = 1'b1;
+                    PCWrite = 1'b1;
+                    PCSource = 2'b11; // JR address (register A)
                 end
             end
 
             `STATE_EX: begin
                 // Execute stage
                 if (opcode == `OP_RTYPE) begin
-                    if (funct == `FUNCT_JR) begin
-                        // Jump Register instruction
-                        Jump = 1'b1;
-                        JR = 1'b1;
-                        PCWrite = 1'b1;
-                        PCSource = 2'b11; // JR address (register A)
-                    end else begin
-                        // Other R-type instructions
-                        ALUSrcA = 2'b01; // Register A
-                        ALUSrcB = 2'b00; // Register B
+                    // R-type instructions
+                    ALUSrcA = 2'b01; // Register A
+                    ALUSrcB = 2'b00; // Register B
 
-                        case (funct)
-                            `FUNCT_ADDU: ALUOp = `ALU_ADDU;
-                            `FUNCT_SUBU: ALUOp = `ALU_SUBU;
-                            `FUNCT_AND: ALUOp = `ALU_AND;
-                            `FUNCT_OR: ALUOp = `ALU_OR;
-                            `FUNCT_XOR: ALUOp = `ALU_XOR;
-                            `FUNCT_NOR: ALUOp = `ALU_NOR;
-                            `FUNCT_SLT: ALUOp = `ALU_SLT;
-                            `FUNCT_SLTU: ALUOp = `ALU_SLTU;
-                            `FUNCT_SLL: ALUOp = `ALU_SLL;
-                            `FUNCT_SRL: ALUOp = `ALU_SRL;
-                            `FUNCT_SRA: ALUOp = `ALU_SRA;
-                        endcase
-                    end
+                    case (funct)
+                        `FUNCT_ADDU: ALUOp = `ALU_ADDU;
+                        `FUNCT_SUBU: ALUOp = `ALU_SUBU;
+                        `FUNCT_AND: ALUOp = `ALU_AND;
+                        `FUNCT_OR: ALUOp = `ALU_OR;
+                        `FUNCT_XOR: ALUOp = `ALU_XOR;
+                        `FUNCT_NOR: ALUOp = `ALU_NOR;
+                        `FUNCT_SLT: ALUOp = `ALU_SLT;
+                        `FUNCT_SLTU: ALUOp = `ALU_SLTU;
+                        `FUNCT_SLL: ALUOp = `ALU_SLL;
+                        `FUNCT_SRL: ALUOp = `ALU_SRL;
+                        `FUNCT_SRA: ALUOp = `ALU_SRA;
+                    endcase
                 end else if (opcode == `OP_BEQ || opcode == `OP_BNE) begin
                     // Branch instructions
                     ALUSrcA = 2'b01;  // Register A
